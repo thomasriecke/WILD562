@@ -80,6 +80,121 @@ dat$z.deer <- as.numeric(scale(dat$deerwin))
 
 
 
+
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# JAGS model
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+sink("m_rsf.jags")
+cat("
+    model {
+
+    # priors for everything assigned in a loop to minimize unnecessary coding mistakes
+    for (j in 1:2){
+      # alpha[j] ~ dnorm(0, 0.1) # intercept and effect of elevation on deer
+      beta[j+1] ~ dnorm(0, 0.1) # effects of elevation and deer on wolf use
+    }
+    beta[1] ~ dlogis(0,1) # intercept
+
+
+    # st. dev. and precision for deer model
+    #   sigma ~ dgamma(1,1)
+    #   tau = 1/(sigma * sigma)
+
+    for (i in 1:n){
+      # here is the model for deer, lm(deer ~ elevation)
+      # d[i] ~ dnorm(alpha[1] + alpha[2] * e[i], tau)
+      # here the model for wolves, glm(used ~ elevation + deer, family = 'binomial')
+      logit(psi[i]) = beta[1] + beta[2] * e[i] + beta[3] * d[i]
+      y[i] ~ dbern(psi[i])
+    }
+
+    }
+    ",fill = TRUE)
+sink()
+
+jags.data <- list(n = nrow(dat), d = dat$z.deer, e = dat$z.elev, y = dat$used)
+inits <- function(){list()}  
+parameters <- c('alpha','beta','sigma')
+
+# number of chains (nc), thinning rate (nt), number of iterations (ni), and number to burn-in
+nc <- 4
+nt <- 10
+ni <- 20000
+nb <- 10000
+
+
+
+library(jagsUI)
+Sys.time()
+m <- jags(jags.data, inits, parameters, "m_rsf.jags", parallel = T, 
+          n.chains = nc, n.thin = nt, n.iter = ni, n.burnin = nb)
+Sys.time()
+
+
+
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# use the full posteriors to make plots with uncertainty
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+iters <- length(m$sims.list$beta[,1]) # we saved 4000 iterations
+res <- 100
+
+# elevation values for prediction
+xE <- seq(min(dat$z.elev),max(dat$z.elev), length.out = res)
+
+# expected deer (Ed), 
+# direct effect of elevation (De), 
+# total effect of elevation (Te)
+
+De <- matrix(NA, iters, res) 
+
+
+# quantiles
+
+qDe <- matrix(NA, res, 5)
+
+
+for (j in 1:res){
+
+  # expected value of P(use) given direct effect of elevation
+  De[,j] <- plogis(m$sims.list$beta[,1] + m$sims.list$beta[,2] * xE[j])  
+  qDe[j, ] <- quantile(De[,j], c(0.025,0.05,0.5,0.95,0.975))
+
+}
+
+# melt these massive matrices into long format
+mDe <- melt(De); names(mDe) <- c('iter','x','w')
+
+
+
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Plot to compare direct vs. total effects
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+plot.x <- seq(1400,3000, length.out = 9)
+plot.s <- (plot.x - mean(dat$elevati))/sd(dat$elevati)
+plot(qDe[,3] ~ xE, type = 'l', ylim = c(0,1),
+     xlab = 'Elevation (m)', xaxt = 'n', lwd = 2,
+     ylab = 'P(Used)', las = 1, cex.lab = 2)
+lines(qDe[,1] ~ xE, lty = 2)
+lines(qDe[,5] ~ xE, lty = 2)
+
+
+
+
+
+
+
+
+
+
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # JAGS model
